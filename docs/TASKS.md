@@ -15,7 +15,7 @@ Size: S ≤ 2 h · M ≤ half a day · L ≤ a day (rough).
 |---|---|---|---|---|---|---|---|
 | T-01 | F | Scaffold repo folders (`core/`, `backend/`, `web/`, `android/`, `ml/`, `tools/`), `pyproject.toml` files, linters, pre-commit | S | — | NFR-12 | `make lint` runs (even if empty) | done |
 | T-02 | F | Bring up infra: `make up`; verify `schema.sql` and `seed.sql` apply; MinIO bucket exists | S | T-01 | NFR-12 | `psql` shows all tables; MinIO console shows `civiclens-crops` | done |
-| T-03 | B | Config loader (`.env` + `thresholds.yaml`, typed, validated), `Clock` with offset from `app_state`, `/healthz` | S | T-02 | NFR-05 | `GET /healthz` returns db, storage, clock offset; invalid threshold file fails at startup | todo |
+| T-03 | B | Config loader (`.env` + `thresholds.yaml`, typed, validated), `Clock` with offset from `app_state`, `/healthz` | S | T-02 | NFR-05 | `GET /healthz` returns db, storage, clock offset; invalid threshold file fails at startup | done |
 
 ## Gate G0: infra up, `/healthz` green.
 
