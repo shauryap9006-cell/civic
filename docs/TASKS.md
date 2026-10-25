@@ -29,7 +29,7 @@ Size: S ≤ 2 h · M ≤ half a day · L ≤ a day (rough).
 | T-11 | B | `logic/severity.py` | S | T-03 | EVT-04 | `TC-SEV-01..02` | done |
 | T-12 | B | `logic/merge.py` (choose pothole or create) | S | T-10 | MRG-01 | `TC-MRG-01..04` | done |
 | T-13 | B | `logic/coverage.py` (crossings, approach window, per-sample checks, reasons) | L | T-10 | VER-02, VER-03 | `TC-COV-01..14`; test factories for synthetic passes exist | done |
-| T-14 | B | `logic/state_machine.py` (allowed transitions, guards, reason codes) | M | T-03 | VER-04..08 | Illegal transitions raise; table in STATE_MACHINE §2 fully covered | todo |
+| T-14 | B | `logic/state_machine.py` (allowed transitions, guards, reason codes) | M | T-03 | VER-04..08 | Illegal transitions raise; table in STATE_MACHINE §2 fully covered | done |
 | T-15 | B | `logic/verification.py` (`evaluate`, pure, idempotent) | L | T-13, T-14 | VER-05..08 | `TC-VER-01..17` (scenarios S1..S16) green | todo |
 
 ## Gate G1: all logic tests green with no database.
