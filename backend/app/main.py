@@ -2,19 +2,23 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import register_or_get_device
+from app.auth import register_or_get_device, verify_request_signature
 from app.clock import clock
-from app.config import Settings, load_thresholds
+from app.config import Settings, Thresholds, load_thresholds
 from app.db import get_db_session, init_db
-from app.storage import check_storage_health
+from app.storage import (
+    check_storage_health,
+    generate_crop_key,
+    generate_presigned_put,
+)
 
 
 @asynccontextmanager
@@ -64,6 +68,20 @@ class DeviceRegisterRequest(BaseModel):
 class DeviceRegisterResponse(BaseModel):
     device_id: str
     server_time: str
+
+
+class UploadSignRequest(BaseModel):
+    content_type: Literal["image/jpeg"]
+    sha256: str = Field(min_length=64, max_length=64)
+    size_bytes: int = Field(ge=1, le=1_000_000)
+
+
+class UploadSignResponse(BaseModel):
+    crop_key: str
+    upload_url: str
+    method: Literal["PUT"] = "PUT"
+    headers: dict[str, str]
+    expires_at: str
 
 
 # ---------------------------------------------------------------------------
@@ -144,5 +162,33 @@ async def register_device(
     return DeviceRegisterResponse(
         device_id=str(device.id),
         server_time=server_time.isoformat(),
+    )
+
+
+@app.post("/v1/uploads/sign", tags=["Ingest"])
+async def sign_upload(
+    request: Request,
+    body: UploadSignRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> UploadSignResponse:
+    """Issue a presigned PUT URL for uploading one crop image directly to MinIO / S3."""
+    settings: Settings = getattr(app.state, "settings", Settings())
+    thresholds: Thresholds | None = getattr(app.state, "thresholds", None)
+    tolerance = thresholds.auth.request_signature_tolerance_s if thresholds else 300
+
+    device = await verify_request_signature(request, session, tolerance_s=tolerance)
+
+    crop_key = generate_crop_key(device_id=device.id)
+    upload_url, headers, expires_at = generate_presigned_put(
+        settings=settings,
+        crop_key=crop_key,
+        content_type=body.content_type,
+    )
+    return UploadSignResponse(
+        crop_key=crop_key,
+        upload_url=upload_url,
+        method="PUT",
+        headers=headers,
+        expires_at=expires_at.isoformat(),
     )
 
