@@ -40,7 +40,7 @@ Size: S ≤ 2 h · M ≤ half a day · L ≤ a day (rough).
 
 | ID | Track | Ticket | Size | Depends | Reqs | Acceptance | Status |
 |---|---|---|---|---|---|---|---|
-| T-20 | B | Models and DB layer mirroring `schema.sql`; `services/potholes.py` skeleton with row locking | M | T-03 | API-01 | Create/read potholes in a transaction test | todo |
+| T-20 | B | Models and DB layer mirroring `schema.sql`; `services/potholes.py` skeleton with row locking | M | T-03 | API-01 | Create/read potholes in a transaction test | done |
 | T-21 | B | Device registration and signature verification (headers + envelope), timestamp window | M | T-20 | API-02, EVT-03 | `TC-ING-01..06` | todo |
 | T-22 | B | Upload signing and storage helpers (presigned PUT/GET, existence and hash check) | S | T-02 | EVT-02 | Upload a test JPEG; hash mismatch is detected | todo |
 | T-23 | B | `POST /v1/events` ingest: validate, dedupe, merge, severity, history `first_event`, per-event results | L | T-12, T-11, T-21, T-22 | EVT-01..03, MRG-01 | `TC-ING-*`, `TC-MRG-*` through the API; duplicate id → `duplicate` | todo |
