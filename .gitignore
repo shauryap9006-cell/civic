@@ -1,0 +1,73 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.secret
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node / Web
+web/node_modules/
+node_modules/
+web/.next/
+.next/
+web/out/
+out/
+.npm
+*.tsbuildinfo
+next-env.d.ts
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+*.apk
+*.aab
+local.properties
+.gradle/
+
+# Database / Storage data
+*.sqlite3
+*.db
+dbdata/
+miniodata/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

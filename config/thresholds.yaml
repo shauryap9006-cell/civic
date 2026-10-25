@@ -1,0 +1,97 @@
+# CivicLens thresholds — the single source of truth for every tunable number.
+#
+# RULES
+#  - Code must read these values from this file (backend: app/config.py, core: civiclens_core/config.py,
+#    Android: a copy bundled as an asset and generated from this file by tools/export_thresholds.py).
+#  - Never hard-code any of these numbers in source files or tests. Tests may override values explicitly.
+#  - Every value is a STARTING POINT [Assumed]. Tune it with measurements and record the change in
+#    docs/DECISIONS.md with the evidence.
+
+version: 1
+
+detection:
+  model_input_px: 640            # long side of the inference image
+  detector_conf_min: 0.25        # raw detector confidence floor; low on purpose (favours recall)
+  nms_iou: 0.50
+  roi:                           # road region of interest as fractions of the frame
+    x0: 0.10
+    y0: 0.45
+    x1: 0.90
+    y1: 0.95
+  target_fps: 10                 # desired inference rate
+  min_fps: 5                     # never go below this when throttling
+
+tracking:
+  tracker: bytetrack             # bytetrack | botsort
+  min_track_frames: 3            # a candidate becomes an event only after this many tracked frames
+  min_mean_confidence: 0.45      # mean confidence over the track must reach this
+  lost_track_buffer_frames: 5
+
+event:
+  crop_padding_ratio: 0.25       # padding around the box before cropping
+  crop_max_side_px: 512
+  jpeg_quality: 85
+  best_view_score: confidence_x_area   # frame chosen for the crop
+  store_wide_frame: false        # MUST stay false (privacy requirement NFR-06 / EVT-02)
+
+merge:
+  radius_m: 10                   # events within this distance join the nearest pothole
+  location_estimate: confidence_weighted_mean
+
+severity:                        # graded bands, not measured depth
+  area_ratio_saturation: 0.10    # box area / frame area at which the area score saturates at 1.0
+  repeat_saturation: 5           # number of events at which the repeat score saturates at 1.0
+  weight_area: 0.5
+  weight_confidence: 0.3
+  weight_repeat: 0.2
+  band_medium_min: 0.33          # score >= this is medium
+  band_high_min: 0.66            # score >= this is high
+
+pass_quality:
+  sample_interval_s: 0.2         # 5 Hz quality samples
+  window_min_m: 5                # approach window: distance to the pothole, near edge
+  window_max_m: 25               # approach window: distance to the pothole, far edge
+  max_lateral_offset_m: 6        # closest approach must be within this to count as a crossing
+  max_heading_diff_deg: 35       # camera heading vs bearing to the pothole
+  min_window_samples: 3          # fewer samples in the window => insufficient_window_samples
+  min_window_ok_fraction: 0.80   # share of window samples that must pass every check
+  min_sharpness: 60.0            # variance of the Laplacian on the ROI (grayscale, 320 px wide); CALIBRATE
+  max_occlusion_ratio: 0.30      # share of the ROI covered by vehicles
+  occlusion_check_enabled: true  # if false, occlusion is not evaluated; the UI must say so
+  min_mean_luma: 45              # 0-255 mean luminance of the ROI
+  max_gps_accuracy_m: 15
+  max_speed_mps: 25              # about 90 km/h
+  min_inference_fps: 5           # detector must really have been running at this rate
+  require_detector_active: true
+
+verification:
+  required_clean_passes: 2       # valid clean passes after the claim that verify a repair
+  require_distinct_passes: true  # passes must have different pass ids (different drives)
+  reopen_min_event_confidence: 0.50
+  reopen_min_events: 1           # production should consider 2 independent events
+
+escalation:
+  reminder_after_days: 14        # since last_reported_at, with no Fixed claim
+  escalate_after_days: 28
+  check_interval_minutes: 60
+
+email:
+  initial_per_pothole: 1         # exactly one initial email per pothole
+  max_retries: 5
+
+offline:
+  backoff_base_s: 2
+  backoff_max_s: 300
+  jitter: true
+  max_batch_events: 20
+  max_batch_bytes: 5000000
+
+thermal:
+  reduce_at_status: moderate     # Android thermal status at which inference slows
+  stop_at_status: severe         # at this status pause detection and tell the driver
+
+auth:
+  request_signature_tolerance_s: 300
+
+demo:
+  skip_time_enabled: true        # forced to false when APP_ENV=production

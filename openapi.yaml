@@ -1,0 +1,685 @@
+openapi: 3.0.3
+info:
+  title: CivicLens API
+  version: 0.1.0
+  description: |
+    Contract between the Android app / replay tool, the backend and the website.
+    If code and this file disagree, fix the code (or propose a change in docs/OPEN_QUESTIONS.md).
+
+    ## Authentication
+    * **Device endpoints** (`/v1/events`, `/v1/passes`, `/v1/uploads/sign`) require three headers:
+      `X-Device-Id`, `X-Timestamp` (Unix seconds, real clock) and `X-Signature`.
+      The signature is Ed25519 over the UTF-8 bytes of
+      `METHOD + "\n" + PATH + "\n" + X-Timestamp + "\n" + lowercase_hex(SHA-256(request body bytes))`,
+      encoded as base64. The server rejects timestamps further than `auth.request_signature_tolerance_s`
+      (config/thresholds.yaml) from its real clock. The simulated demo clock never affects this check.
+    * **Event and pass bodies are additionally signed individually.** Each is an envelope
+      `{payload, signature}` where `payload` is a JSON **string** and `signature` is the base64 Ed25519
+      signature of the exact UTF-8 bytes of that string. This avoids JSON canonicalisation problems and lets
+      the server keep the exact signed bytes for audit.
+    * **Public read endpoints** need no authentication.
+    * **Fixed endpoints** are authorised by an unguessable token in the path.
+    * **Admin endpoints** require `X-Admin-Secret` and exist only when `DEMO_MODE=true` and `APP_ENV` is not `production`.
+
+    ## Conventions
+    * Times are ISO 8601 UTC strings with millisecond precision, for example `2026-10-25T09:30:12.345Z`.
+    * Coordinates are WGS84 decimal degrees (`lat`, `lon`). Distances in metres, speeds in m/s.
+    * Uploads are idempotent: events by `id`, passes by `id`. Re-sending is always safe.
+    * Large bodies (passes) may be gzip-compressed with `Content-Encoding: gzip`; the body hash is computed over
+      the bytes actually sent.
+servers:
+  - url: http://localhost:8000
+    description: Local development
+tags:
+  - name: Device
+  - name: Ingest
+  - name: Public
+  - name: Authority
+  - name: Admin
+paths:
+  /healthz:
+    get:
+      summary: Liveness and dependency check
+      operationId: healthz
+      tags: [Public]
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, example: ok}
+                  db: {type: string, example: ok}
+                  storage: {type: string, example: ok}
+                  time: {type: string, format: date-time}
+                  clock_offset_seconds: {type: integer, example: 0}
+
+  /v1/devices/register:
+    post:
+      summary: Register a device and its Ed25519 public key
+      operationId: registerDevice
+      tags: [Device]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceRegisterRequest'}
+      responses:
+        '201':
+          description: Device created (or the existing record if the key is already registered)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceRegisterResponse'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+
+  /v1/uploads/sign:
+    post:
+      summary: Get a short-lived presigned URL to upload one crop image
+      operationId: signUpload
+      tags: [Ingest]
+      security: [{DeviceSignature: []}]
+      parameters:
+        - {$ref: '#/components/parameters/DeviceId'}
+        - {$ref: '#/components/parameters/Timestamp'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UploadSignRequest'}
+      responses:
+        '200':
+          description: Presigned PUT URL
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UploadSignResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+
+  /v1/events:
+    post:
+      summary: Upload a batch of signed pothole events
+      description: |
+        Each event is processed independently. The crop referenced by `crop_key` must already be uploaded
+        (the outbox uploads the crop first, then the event). Results are returned per event.
+        Processing: verify signatures, store, merge into a pothole, recompute severity, trigger the first
+        report email, and re-evaluate verification for the affected pothole.
+      operationId: uploadEvents
+      tags: [Ingest]
+      security: [{DeviceSignature: []}]
+      parameters:
+        - {$ref: '#/components/parameters/DeviceId'}
+        - {$ref: '#/components/parameters/Timestamp'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EventsRequest'}
+      responses:
+        '200':
+          description: Per-event results
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EventsResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+
+  /v1/passes:
+    post:
+      summary: Upload one drive pass with quality samples
+      description: |
+        A pass is one drive session. The samples (5 Hz by default) record position and image-quality flags so the
+        backend can decide which potholes the camera could really see. Upload even when no pothole was detected;
+        that is exactly the evidence verification needs.
+      operationId: uploadPass
+      tags: [Ingest]
+      security: [{DeviceSignature: []}]
+      parameters:
+        - {$ref: '#/components/parameters/DeviceId'}
+        - {$ref: '#/components/parameters/Timestamp'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PassEnvelope'}
+      responses:
+        '200':
+          description: Pass stored (or already stored)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PassResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+
+  /v1/potholes:
+    get:
+      summary: List potholes for the map
+      operationId: listPotholes
+      tags: [Public]
+      parameters:
+        - name: bbox
+          in: query
+          description: min_lon,min_lat,max_lon,max_lat
+          schema: {type: string, example: '76.60,30.70,76.90,30.80'}
+        - name: status
+          in: query
+          description: Repeat to filter by several statuses
+          schema:
+            type: array
+            items: {$ref: '#/components/schemas/PotholeStatus'}
+          style: form
+          explode: true
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 1000, default: 500}
+      responses:
+        '200':
+          description: Potholes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/PotholeSummary'}
+
+  /v1/potholes/{id}:
+    get:
+      summary: Pothole detail with full evidence
+      operationId: getPothole
+      tags: [Public]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Pothole detail
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PotholeDetail'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/fixed/{token}:
+    get:
+      summary: Preview the pothole behind a Fixed link
+      operationId: previewFixed
+      tags: [Authority]
+      parameters:
+        - {$ref: '#/components/parameters/FixedToken'}
+      responses:
+        '200':
+          description: Pothole summary and whether the claim is currently allowed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FixedPreview'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '410':
+          description: Token superseded because the pothole was reopened and a newer link was sent
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      summary: Claim that the pothole is repaired
+      description: |
+        Sets `claimed_fixed` when the pothole is `reported`. A claim is NOT proof; verification still has to confirm it.
+        Idempotent: repeating the call after a successful claim returns the current state with 200.
+      operationId: claimFixed
+      tags: [Authority]
+      parameters:
+        - {$ref: '#/components/parameters/FixedToken'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 500
+                  description: 'Optional free text, for example a work order number'
+      responses:
+        '200':
+          description: Current state after the claim
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FixedClaimResponse'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: The pothole is not in a state that accepts a claim
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '410':
+          description: Token superseded
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /v1/stats:
+    get:
+      summary: Impact counters
+      operationId: getStats
+      tags: [Public]
+      responses:
+        '200':
+          description: Counters
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Stats'}
+
+  /v1/admin/simulate-time:
+    post:
+      summary: Advance the simulated clock (demo only)
+      description: |
+        Adds seconds to `clock_offset_seconds`, then runs the escalation job and re-evaluates every pothole in a
+        non-terminal state. Returns what changed. All server logic must read time from the Clock abstraction.
+      operationId: simulateTime
+      tags: [Admin]
+      security: [{AdminSecret: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [advance_seconds]
+              properties:
+                advance_seconds: {type: integer, minimum: 1, maximum: 31536000, example: 1209600}
+      responses:
+        '200':
+          description: New clock and resulting changes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  now: {type: string, format: date-time}
+                  clock_offset_seconds: {type: integer}
+                  reports_sent: {type: integer}
+                  status_changes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        pothole_id: {type: string, format: uuid}
+                        from_status: {$ref: '#/components/schemas/PotholeStatus'}
+                        to_status: {$ref: '#/components/schemas/PotholeStatus'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404':
+          description: Demo endpoints are disabled in this environment
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /v1/admin/reset:
+    post:
+      summary: Reset to the clean demo state (demo only)
+      description: Truncates events, passes, potholes, reports and history; resets the clock offset to 0; keeps authorities and devices.
+      operationId: resetDemo
+      tags: [Admin]
+      security: [{AdminSecret: []}]
+      responses:
+        '200':
+          description: Reset done
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, example: reset}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404':
+          description: Demo endpoints are disabled in this environment
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+components:
+  securitySchemes:
+    DeviceSignature:
+      type: apiKey
+      in: header
+      name: X-Signature
+      description: Base64 Ed25519 signature of the request (see API description). Used together with X-Device-Id and X-Timestamp.
+    AdminSecret:
+      type: apiKey
+      in: header
+      name: X-Admin-Secret
+
+  parameters:
+    DeviceId:
+      name: X-Device-Id
+      in: header
+      required: true
+      schema: {type: string, format: uuid}
+    Timestamp:
+      name: X-Timestamp
+      in: header
+      required: true
+      description: Unix seconds on the device at request time
+      schema: {type: integer, example: 1793000000}
+    FixedToken:
+      name: token
+      in: path
+      required: true
+      schema: {type: string, minLength: 20}
+
+  responses:
+    ValidationError:
+      description: Body or parameters failed validation
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unauthorized:
+      description: Missing or invalid credentials, bad signature, or timestamp outside the tolerance
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    TooLarge:
+      description: Body larger than the configured limit
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: invalid_signature
+              description: Stable machine-readable code (snake_case)
+            message: {type: string}
+            details: {type: object, additionalProperties: true}
+
+    PotholeStatus:
+      type: string
+      enum: [open, reported, claimed_fixed, unknown, verified, reopened]
+
+    Severity:
+      type: string
+      enum: [low, medium, high]
+
+    DeviceRegisterRequest:
+      type: object
+      required: [public_key, platform]
+      properties:
+        public_key: {type: string, description: Base64 Ed25519 public key (32 bytes)}
+        platform: {type: string, enum: [android, linux, replay]}
+        app_version: {type: string}
+        model_version: {type: string}
+
+    DeviceRegisterResponse:
+      type: object
+      required: [device_id]
+      properties:
+        device_id: {type: string, format: uuid}
+        server_time: {type: string, format: date-time}
+
+    UploadSignRequest:
+      type: object
+      required: [content_type, sha256, size_bytes]
+      properties:
+        content_type: {type: string, enum: [image/jpeg]}
+        sha256: {type: string, description: Lowercase hex SHA-256 of the image bytes}
+        size_bytes: {type: integer, minimum: 1, maximum: 1000000}
+
+    UploadSignResponse:
+      type: object
+      required: [crop_key, upload_url, expires_at]
+      properties:
+        crop_key: {type: string, description: Object key to put in the event payload}
+        upload_url: {type: string, format: uri}
+        method: {type: string, enum: [PUT], default: PUT}
+        headers:
+          type: object
+          additionalProperties: {type: string}
+          description: Headers that must be sent with the PUT
+        expires_at: {type: string, format: date-time}
+
+    SignedEnvelope:
+      type: object
+      required: [payload, signature]
+      properties:
+        payload: {type: string, description: JSON string; the exact bytes that were signed}
+        signature: {type: string, description: Base64 Ed25519 signature of the UTF-8 bytes of payload}
+
+    EventPayload:
+      description: Schema of the JSON string inside an event envelope's `payload`
+      type: object
+      required: [id, device_id, captured_at, lat, lon, confidence, track_frames, crop_key, crop_sha256]
+      properties:
+        id: {type: string, format: uuid, description: Generated on the device}
+        device_id: {type: string, format: uuid}
+        pass_id: {type: string, format: uuid, description: The pass (drive) this event belongs to}
+        captured_at: {type: string, format: date-time}
+        lat: {type: number, minimum: -90, maximum: 90}
+        lon: {type: number, minimum: -180, maximum: 180}
+        gps_accuracy_m: {type: number, minimum: 0}
+        heading_deg: {type: number, minimum: 0, maximum: 360}
+        speed_mps: {type: number, minimum: 0}
+        confidence: {type: number, minimum: 0, maximum: 1, description: Mean confidence over the track}
+        track_frames: {type: integer, minimum: 1}
+        area_ratio: {type: number, minimum: 0, maximum: 1, description: Box area divided by frame area on the best frame}
+        sharpness: {type: number}
+        mean_luma: {type: number, minimum: 0, maximum: 255}
+        crop_key: {type: string}
+        crop_sha256: {type: string}
+        model_version: {type: string}
+        app_version: {type: string}
+
+    EventsRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {$ref: '#/components/schemas/SignedEnvelope'}
+
+    EventResult:
+      type: object
+      required: [event_id, result]
+      properties:
+        event_id: {type: string, format: uuid}
+        result:
+          type: string
+          enum: [accepted, duplicate, rejected]
+          description: '`duplicate` means the id was already stored; treat it as success.'
+        pothole_id: {type: string, format: uuid}
+        pothole_status: {$ref: '#/components/schemas/PotholeStatus'}
+        reason:
+          type: string
+          description: Present when rejected
+          enum: [invalid_signature, malformed_payload, crop_missing, crop_hash_mismatch, device_mismatch, invalid_coordinates]
+
+    EventsResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items: {$ref: '#/components/schemas/EventResult'}
+
+    PassSample:
+      type: object
+      required: [t, lat, lon, accuracy_m, speed_mps, heading_deg, sharpness, mean_luma, detector_active, inference_fps]
+      properties:
+        t: {type: string, format: date-time}
+        lat: {type: number}
+        lon: {type: number}
+        accuracy_m: {type: number}
+        speed_mps: {type: number}
+        heading_deg: {type: number}
+        sharpness: {type: number, description: Variance of the Laplacian on the ROI}
+        occlusion_ratio:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: Null when occlusion was not evaluated
+        mean_luma: {type: number, minimum: 0, maximum: 255}
+        detector_active: {type: boolean, description: True only if the detector really ran for this sample}
+        inference_fps: {type: number, minimum: 0}
+
+    PassPayload:
+      description: Schema of the JSON string inside a pass envelope's `payload`
+      type: object
+      required: [id, device_id, started_at, ended_at, samples]
+      properties:
+        id: {type: string, format: uuid}
+        device_id: {type: string, format: uuid}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time}
+        model_version: {type: string}
+        app_version: {type: string}
+        sample_interval_s: {type: number, example: 0.2}
+        samples:
+          type: array
+          minItems: 2
+          items: {$ref: '#/components/schemas/PassSample'}
+
+    PassEnvelope:
+      allOf:
+        - {$ref: '#/components/schemas/SignedEnvelope'}
+
+    PassResponse:
+      type: object
+      required: [pass_id, result]
+      properties:
+        pass_id: {type: string, format: uuid}
+        result: {type: string, enum: [accepted, duplicate]}
+        potholes_evaluated: {type: integer}
+        status_changes:
+          type: array
+          items:
+            type: object
+            properties:
+              pothole_id: {type: string, format: uuid}
+              from_status: {$ref: '#/components/schemas/PotholeStatus'}
+              to_status: {$ref: '#/components/schemas/PotholeStatus'}
+
+    PotholeSummary:
+      type: object
+      required: [id, lat, lon, status, severity, event_count, first_seen_at, last_event_at]
+      properties:
+        id: {type: string, format: uuid}
+        lat: {type: number}
+        lon: {type: number}
+        status: {$ref: '#/components/schemas/PotholeStatus'}
+        severity: {$ref: '#/components/schemas/Severity'}
+        event_count: {type: integer}
+        first_seen_at: {type: string, format: date-time}
+        last_event_at: {type: string, format: date-time}
+        thumbnail_url: {type: string, format: uri, nullable: true}
+        source_badge: {type: string, enum: [live, replay, seed], description: Derived from the contributing devices}
+
+    EventSummary:
+      type: object
+      required: [id, captured_at, confidence, crop_url]
+      properties:
+        id: {type: string, format: uuid}
+        captured_at: {type: string, format: date-time}
+        confidence: {type: number}
+        severity: {$ref: '#/components/schemas/Severity'}
+        crop_url: {type: string, format: uri, description: Short-lived presigned GET URL}
+        device_platform: {type: string, enum: [android, linux, replay, seed]}
+
+    StatusHistoryItem:
+      type: object
+      required: [to_status, reason, at]
+      properties:
+        from_status: {$ref: '#/components/schemas/PotholeStatus', nullable: true}
+        to_status: {$ref: '#/components/schemas/PotholeStatus'}
+        reason:
+          type: string
+          example: clean_passes_met
+          description: See docs/STATE_MACHINE.md for the full list of reason codes
+        evidence: {type: object, additionalProperties: true}
+        at: {type: string, format: date-time}
+
+    CoverageItem:
+      type: object
+      required: [pass_id, crossing_at, clean, reason]
+      properties:
+        pass_id: {type: string, format: uuid}
+        crossing_at: {type: string, format: date-time}
+        clean: {type: boolean}
+        reason: {type: string, example: ok, description: '`ok` or the first failed check'}
+        window_samples: {type: integer}
+        ok_fraction: {type: number}
+
+    PotholeDetail:
+      allOf:
+        - {$ref: '#/components/schemas/PotholeSummary'}
+        - type: object
+          properties:
+            authority_name: {type: string}
+            reported_at: {type: string, format: date-time, nullable: true}
+            claimed_fixed_at: {type: string, format: date-time, nullable: true}
+            verified_at: {type: string, format: date-time, nullable: true}
+            reopened_at: {type: string, format: date-time, nullable: true}
+            before_event: {$ref: '#/components/schemas/EventSummary'}
+            after_events:
+              type: array
+              description: Events captured after the latest claim (the "after" evidence)
+              items: {$ref: '#/components/schemas/EventSummary'}
+            events:
+              type: array
+              items: {$ref: '#/components/schemas/EventSummary'}
+            history:
+              type: array
+              items: {$ref: '#/components/schemas/StatusHistoryItem'}
+            coverage_after_claim:
+              type: array
+              items: {$ref: '#/components/schemas/CoverageItem'}
+            required_clean_passes: {type: integer}
+            occlusion_check_enabled: {type: boolean}
+
+    FixedPreview:
+      type: object
+      required: [pothole, can_claim]
+      properties:
+        pothole: {$ref: '#/components/schemas/PotholeSummary'}
+        can_claim: {type: boolean}
+        message: {type: string, description: Human-readable explanation when claiming is not possible}
+
+    FixedClaimResponse:
+      type: object
+      required: [pothole_id, status, claimed_fixed_at]
+      properties:
+        pothole_id: {type: string, format: uuid}
+        status: {$ref: '#/components/schemas/PotholeStatus'}
+        claimed_fixed_at: {type: string, format: date-time}
+        message: {type: string}
+
+    Stats:
+      type: object
+      required: [potholes_total, reports_sent, claimed_fixed, verified, reopened, unknown]
+      properties:
+        potholes_total: {type: integer}
+        by_status:
+          type: object
+          additionalProperties: {type: integer}
+        reports_sent: {type: integer}
+        claimed_fixed: {type: integer}
+        verified: {type: integer}
+        reopened: {type: integer}
+        unknown: {type: integer}
+        km_covered: {type: number}
