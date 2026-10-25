@@ -6,9 +6,11 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import register_or_get_device
 from app.clock import clock
 from app.config import Settings, load_thresholds
 from app.db import get_db_session, init_db
@@ -45,6 +47,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Request / Response schemas
+# ---------------------------------------------------------------------------
+
+
+class DeviceRegisterRequest(BaseModel):
+    public_key: str
+    platform: str
+    app_version: str | None = None
+    model_version: str | None = None
+
+
+class DeviceRegisterResponse(BaseModel):
+    device_id: str
+    server_time: str
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 
 @app.get("/healthz", tags=["Public"])
@@ -87,3 +111,38 @@ async def healthz(
         )
 
     return payload
+
+
+@app.post("/v1/devices/register", tags=["Device"], status_code=201)
+async def register_device(
+    body: DeviceRegisterRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> DeviceRegisterResponse:
+    """Register a device with its Ed25519 public key (idempotent by public_key)."""
+    allowed_platforms = {"android", "linux", "replay", "seed"}
+    if body.platform not in allowed_platforms:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "error": {
+                    "code": "invalid_platform",
+                    "message": f"platform must be one of {sorted(allowed_platforms)}",
+                }
+            },
+        )
+
+    device = await register_or_get_device(
+        session=session,
+        public_key_b64=body.public_key,
+        platform=body.platform,
+        app_version=body.app_version,
+        model_version=body.model_version,
+    )
+    await session.commit()
+
+    server_time = await clock.now(session)
+    return DeviceRegisterResponse(
+        device_id=str(device.id),
+        server_time=server_time.isoformat(),
+    )
+
