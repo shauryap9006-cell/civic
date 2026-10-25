@@ -25,7 +25,7 @@ Size: S ≤ 2 h · M ≤ half a day · L ≤ a day (rough).
 
 | ID | Track | Ticket | Size | Depends | Reqs | Acceptance | Status |
 |---|---|---|---|---|---|---|---|
-| T-10 | B | `logic/geo.py` (haversine distance, bearing, heading difference, weighted mean location) | S | T-01 | MRG-02 | Unit tests against known coordinate pairs | todo |
+| T-10 | B | `logic/geo.py` (haversine distance, bearing, heading difference, weighted mean location) | S | T-01 | MRG-02 | Unit tests against known coordinate pairs | done |
 | T-11 | B | `logic/severity.py` | S | T-03 | EVT-04 | `TC-SEV-01..02` | todo |
 | T-12 | B | `logic/merge.py` (choose pothole or create) | S | T-10 | MRG-01 | `TC-MRG-01..04` | todo |
 | T-13 | B | `logic/coverage.py` (crossings, approach window, per-sample checks, reasons) | L | T-10 | VER-02, VER-03 | `TC-COV-01..14`; test factories for synthetic passes exist | todo |
