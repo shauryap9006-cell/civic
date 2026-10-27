@@ -43,7 +43,7 @@ Size: S ≤ 2 h · M ≤ half a day · L ≤ a day (rough).
 | T-20 | B | Models and DB layer mirroring `schema.sql`; `services/potholes.py` skeleton with row locking | M | T-03 | API-01 | Create/read potholes in a transaction test | done |
 | T-21 | B | Device registration and signature verification (headers + envelope), timestamp window | M | T-20 | API-02, EVT-03 | `TC-ING-01..06` | done |
 | T-22 | B | Upload signing and storage helpers (presigned PUT/GET, existence and hash check) | S | T-02 | EVT-02 | Upload a test JPEG; hash mismatch is detected | done |
-| T-23 | B | `POST /v1/events` ingest: validate, dedupe, merge, severity, history `first_event`, per-event results | L | T-12, T-11, T-21, T-22 | EVT-01..03, MRG-01 | `TC-ING-*`, `TC-MRG-*` through the API; duplicate id → `duplicate` | todo |
+| T-23 | B | `POST /v1/events` ingest: validate, dedupe, merge, severity, history `first_event`, per-event results | L | T-12, T-11, T-21, T-22 | EVT-01..03, MRG-01 | `TC-ING-*`, `TC-MRG-*` through the API; duplicate id → `duplicate` | done |
 | T-24 | B | Mailer: templates, console + Resend providers, `reports` table, T2 transition, one initial email per pothole | M | T-23 | RPT-01..04 | `TC-RPT-01..04`; ten merged events → one email | todo |
 | T-25 | B | Fixed token derivation (HMAC, epoch) + `GET/POST /v1/fixed/{token}` with the claim rules | M | T-14, T-24 | VER-04, API-03 | `TC-VER-18`, `TC-VER-19`, `TC-API-05` | todo |
 | T-26 | B | `POST /v1/passes` ingest, path building, coverage computation and cache | L | T-13, T-21 | VER-01, VER-02 | `TC-PASS-*`, `TC-COV-*` through the API | todo |

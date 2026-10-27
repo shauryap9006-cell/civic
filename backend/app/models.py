@@ -172,21 +172,15 @@ class Pothole(Base):
     )
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    reported_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_reported_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     claimed_fixed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    verified_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    reopened_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fixed_token_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     fixed_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -353,9 +347,7 @@ class Report(Base):
     authority_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("authorities.id"), nullable=False
     )
-    kind: Mapped[ReportKind] = mapped_column(
-        pg_enum(ReportKind, "report_kind"), nullable=False
-    )
+    kind: Mapped[ReportKind] = mapped_column(pg_enum(ReportKind, "report_kind"), nullable=False)
     to_address: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[ReportDeliveryStatus] = mapped_column(
         pg_enum(ReportDeliveryStatus, "report_delivery_status"),

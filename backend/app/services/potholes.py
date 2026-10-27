@@ -79,7 +79,7 @@ async def find_nearest_pothole(
     stmt = (
         select(Pothole, dist_expr)
         .where(func.ST_DWithin(Pothole.location, point_geom, radius_m))
-        .order_by(dist_expr.asc(), Pothole.created_at.asc())
+        .order_by(dist_expr.asc(), Pothole.created_at.asc(), Pothole.id.asc())
         .limit(1)
     )
     if for_update:
@@ -209,12 +209,7 @@ async def list_potholes(
     offset: int = 0,
 ) -> list[Pothole]:
     """List potholes ordered by creation time descending, with optional status filter."""
-    stmt = (
-        select(Pothole)
-        .order_by(Pothole.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-    )
+    stmt = select(Pothole).order_by(Pothole.created_at.desc()).offset(offset).limit(limit)
     if status is not None:
         stmt = stmt.where(Pothole.status == status)
     result = await session.execute(stmt)

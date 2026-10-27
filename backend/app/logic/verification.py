@@ -104,7 +104,7 @@ class Decision:
         coverage_results: list[CoverageResult],
         current_status: str,
     ) -> "Decision":
-        status_changed = (current_status != PotholeStatus.VERIFIED)
+        status_changed = current_status != PotholeStatus.VERIFIED
         return cls(
             new_status=PotholeStatus.VERIFIED,
             reason=TransitionReason.CLEAN_PASSES_MET,
@@ -120,7 +120,7 @@ class Decision:
         coverage_results: list[CoverageResult],
         current_status: str,
     ) -> "Decision":
-        status_changed = (current_status != PotholeStatus.UNKNOWN)
+        status_changed = current_status != PotholeStatus.UNKNOWN
         return cls(
             new_status=PotholeStatus.UNKNOWN,
             reason=TransitionReason.NO_VALID_CLEAN_PASS,
@@ -165,8 +165,7 @@ def evaluate(
     contradicting = [
         e
         for e in events
-        if e.captured_at > claimed_fixed_at
-        and e.confidence >= th_ver.reopen_min_event_confidence
+        if e.captured_at > claimed_fixed_at and e.confidence >= th_ver.reopen_min_event_confidence
     ]
 
     if len(contradicting) >= th_ver.reopen_min_events:

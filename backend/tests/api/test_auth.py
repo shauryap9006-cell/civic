@@ -351,4 +351,3 @@ def test_fixed_token_derivation_and_hashing():
     h = hash_fixed_token(token_epoch0)
     assert len(h) == 64
     assert hash_fixed_token(token_epoch0) == h
-

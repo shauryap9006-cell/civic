@@ -154,8 +154,8 @@ async def register_or_get_device(
     session: AsyncSession,
     public_key_b64: str,
     platform: str,
-    app_version: str | None,
-    model_version: str | None,
+    app_version: str | None = None,
+    model_version: str | None = None,
 ) -> Device:
     """Register a new device or return the existing one with the same public_key.
 

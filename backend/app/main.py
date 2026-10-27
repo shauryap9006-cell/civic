@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,7 @@ from app.auth import register_or_get_device, verify_request_signature
 from app.clock import clock
 from app.config import Settings, Thresholds, load_thresholds
 from app.db import get_db_session, init_db
+from app.services.events import ingest_single_event
 from app.storage import (
     check_storage_health,
     generate_crop_key,
@@ -53,6 +55,16 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": "http_error", "message": str(exc.detail)}},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
@@ -82,6 +94,37 @@ class UploadSignResponse(BaseModel):
     method: Literal["PUT"] = "PUT"
     headers: dict[str, str]
     expires_at: str
+
+
+class SignedEnvelope(BaseModel):
+    payload: str
+    signature: str
+
+
+class EventsRequest(BaseModel):
+    events: list[SignedEnvelope] = Field(min_length=1, max_length=50)
+
+
+class EventResult(BaseModel):
+    event_id: str
+    result: Literal["accepted", "duplicate", "rejected"]
+    pothole_id: str | None = None
+    pothole_status: str | None = None
+    reason: (
+        Literal[
+            "invalid_signature",
+            "malformed_payload",
+            "crop_missing",
+            "crop_hash_mismatch",
+            "device_mismatch",
+            "invalid_coordinates",
+        ]
+        | None
+    ) = None
+
+
+class EventsResponse(BaseModel):
+    results: list[EventResult]
 
 
 # ---------------------------------------------------------------------------
@@ -192,3 +235,32 @@ async def sign_upload(
         expires_at=expires_at.isoformat(),
     )
 
+
+@app.post("/v1/events", tags=["Ingest"])
+async def upload_events(
+    request: Request,
+    body: EventsRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> EventsResponse:
+    """Upload a batch of signed pothole events (independent per event)."""
+    settings: Settings = getattr(app.state, "settings", Settings())
+    thresholds: Thresholds | None = getattr(app.state, "thresholds", None)
+    tolerance = thresholds.auth.request_signature_tolerance_s if thresholds else 300
+
+    device = await verify_request_signature(request, session, tolerance_s=tolerance)
+
+    active_thresholds = thresholds or load_thresholds(settings.THRESHOLDS_PATH)
+    results: list[dict[str, Any]] = []
+    for item in body.events:
+        res = await ingest_single_event(
+            session=session,
+            device=device,
+            payload_str=item.payload,
+            signature_b64=item.signature,
+            settings=settings,
+            thresholds=active_thresholds,
+        )
+        results.append(res)
+
+    await session.commit()
+    return EventsResponse(results=[EventResult(**r) for r in results])

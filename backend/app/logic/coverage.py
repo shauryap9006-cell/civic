@@ -177,9 +177,7 @@ def evaluate_crossing(
         return False, "insufficient_window_samples", sample_count, 0.0
 
     # 3. Check each sample in window
-    sample_results = [
-        check_sample(s, pothole_lat, pothole_lon, th) for s in window_samples
-    ]
+    sample_results = [check_sample(s, pothole_lat, pothole_lon, th) for s in window_samples]
     ok_count = sum(1 for is_ok, _ in sample_results if is_ok)
     ok_fraction = ok_count / sample_count
 
@@ -191,11 +189,7 @@ def evaluate_crossing(
     counts = Counter(fail_reasons)
 
     def sort_key(reason: str) -> tuple[int, int]:
-        prio = (
-            FAILURE_PRIORITY.index(reason)
-            if reason in FAILURE_PRIORITY
-            else 999
-        )
+        prio = FAILURE_PRIORITY.index(reason) if reason in FAILURE_PRIORITY else 999
         return (-counts[reason], prio)
 
     best_fail_reason = min(counts.keys(), key=sort_key)
@@ -225,8 +219,7 @@ def coverage_for_pass(
 
     # 1. Compute distances for all samples
     distances = [
-        haversine_distance_m(s.lat, s.lon, pothole_lat, pothole_lon)
-        for s in sorted_samples
+        haversine_distance_m(s.lat, s.lon, pothole_lat, pothole_lon) for s in sorted_samples
     ]
 
     # Find crossings

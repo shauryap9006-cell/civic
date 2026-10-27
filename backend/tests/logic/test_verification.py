@@ -261,8 +261,7 @@ def test_TC_VER_17_evaluate_pure_and_idempotent(pothole, t0):
     p2 = make_pass(pothole.lat, pothole.lon, crossing_time=t0 + timedelta(hours=2))
 
     decisions = [
-        evaluate(pothole, events=[], passes=[p1, p2], now=t0 + timedelta(hours=3))
-        for _ in range(5)
+        evaluate(pothole, events=[], passes=[p1, p2], now=t0 + timedelta(hours=3)) for _ in range(5)
     ]
     for d in decisions:
         assert d.new_status == PotholeStatus.VERIFIED
