@@ -196,13 +196,12 @@ async def register_or_get_device(
 def derive_fixed_token(pothole_id: uuid.UUID, epoch: int, secret: str) -> str:
     """Derive an HMAC-SHA256 fixed token for the given pothole and epoch.
 
-    Only the hex digest hash is stored in the DB (never the token itself).
-    Returns the URL-safe token string (first 40 hex chars, unguessable).
-    Per T-25 / API-03: fixed links use unguessable tokens; only hash stored.
+    Per W-06: token = base64url(HMAC_SHA256(FIXED_TOKEN_SECRET, "{id}:{epoch}")) (43 chars).
+    Only the hex digest hash is stored in the DB (never the plaintext token itself).
     """
     msg = f"{pothole_id}:{epoch}".encode()
-    digest = hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
-    return digest[:40]  # 20 bytes / 160 bits of hex — plenty for a URL token
+    raw_mac = hmac.new(secret.encode(), msg, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(raw_mac).decode().rstrip("=")
 
 
 def hash_fixed_token(token: str) -> str:

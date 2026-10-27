@@ -340,8 +340,8 @@ def test_fixed_token_derivation_and_hashing():
     token_epoch0 = derive_fixed_token(pothole_id, 0, secret)
     token_epoch1 = derive_fixed_token(pothole_id, 1, secret)
 
-    assert len(token_epoch0) == 40
-    assert len(token_epoch1) == 40
+    assert len(token_epoch0) == 43
+    assert len(token_epoch1) == 43
     assert token_epoch0 != token_epoch1
 
     # Deterministic
