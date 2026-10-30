@@ -77,10 +77,10 @@ Size: S ≤ 2 h · M ≤ half a day · L ≤ a day (rough).
 |---|---|---|---|---|---|---|---|
 | T-40 | W | Next.js scaffold, API client generated from `openapi.yaml`, layout, design tokens (status colours + icons) | M | T-01 | WEB-01 | Pages render with mocked data | done |
 | T-41 | W | Map page with six status styles, legend, filters, popups, replay/seed badges | L | T-40, T-28 | WEB-01 | `TC-WEB-01`, `TC-WEB-02` | done |
-| T-42 | W | Pothole detail page: timeline, before/after, pass log table, "occlusion not checked" note | L | T-40, T-28 | WEB-02 | `TC-WEB-03` | todo |
-| T-43 | W | Authority Fixed page (preview, button, states for 404/410/409) | M | T-25, T-40 | WEB-03 | `TC-WEB-05` | todo |
-| T-44 | W | Impact page and header strip | S | T-28 | WEB-04 | `TC-WEB-04` | todo |
-| T-45 | W | `/demo` page: skip-time buttons, reset, service status (demo mode only) | S | T-29 | WEB-05 | `TC-DEMO-03` | todo |
+| T-42 | W | Pothole detail page: timeline, before/after, pass log table, "occlusion not checked" note | L | T-40, T-28 | WEB-02 | `TC-WEB-03` | done |
+| T-43 | W | Authority Fixed page (preview, button, states for 404/410/409) | M | T-25, T-40 | WEB-03 | `TC-WEB-05` | done |
+| T-44 | W | Impact page and header strip | S | T-28 | WEB-04 | `TC-WEB-04` | done |
+| T-45 | W | `/demo` page: skip-time buttons, reset, service status (demo mode only) | S | T-29 | WEB-05 | `TC-DEMO-03` | done |
 
 ## Gate G4: the full path works on a laptop: replay → map → email → Fixed click → verified → reopen with before/after.
 
