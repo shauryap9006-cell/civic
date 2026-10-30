@@ -2,18 +2,38 @@
 
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import { Filter, Layers, ExternalLink, Calendar, MapPin, Eye } from "lucide-react";
+import {
+  Filter,
+  Layers,
+  ExternalLink,
+  Calendar,
+  MapPin,
+  Eye,
+  Info,
+} from "lucide-react";
 import { PotholeSummary, PotholeStatus } from "../lib/types";
 import { listPotholes } from "../lib/api";
-import { STATUS_TOKENS, SEVERITY_CONFIG, SEVERITY_TOOLTIP } from "../lib/tokens";
+import {
+  STATUS_TOKENS,
+  SEVERITY_CONFIG,
+  SEVERITY_TOOLTIP,
+} from "../lib/tokens";
 import { StatusBadge } from "../components/StatusBadge";
 import { SourceBadge } from "../components/SourceBadge";
+import { MapLibreView } from "../components/MapLibreView";
 
 export default function MapPage() {
   const [potholes, setPotholes] = useState<PotholeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStatuses, setSelectedStatuses] = useState<Set<PotholeStatus>>(
-    new Set<PotholeStatus>(["open", "reported", "claimed_fixed", "unknown", "verified", "reopened"])
+    new Set<PotholeStatus>([
+      "open",
+      "reported",
+      "claimed_fixed",
+      "unknown",
+      "verified",
+      "reopened",
+    ])
   );
   const [activePothole, setActivePothole] = useState<PotholeSummary | null>(null);
 
@@ -69,9 +89,9 @@ export default function MapPage() {
   }, [potholes, selectedStatuses]);
 
   return (
-    <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
-      {/* Sidebar: Filters & Pothole List */}
-      <aside className="w-full md:w-96 bg-white border-r border-slate-200 flex flex-col z-10 shrink-0 h-[50vh] md:h-auto overflow-hidden">
+    <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative min-h-[calc(100vh-4rem)]">
+      {/* Left Panel: Filters, Legend, and Pothole Cards */}
+      <aside className="w-full md:w-96 bg-white border-r border-slate-200 flex flex-col z-10 shrink-0 h-[45vh] md:h-auto overflow-hidden">
         {/* Filter Controls Header */}
         <div className="p-4 border-b border-slate-200 bg-slate-50/70">
           <div className="flex items-center justify-between mb-3">
@@ -84,7 +104,7 @@ export default function MapPage() {
             </span>
           </div>
 
-          {/* Filter Checkboxes */}
+          {/* Filter Chips */}
           <div className="grid grid-cols-2 gap-2">
             {(Object.keys(STATUS_TOKENS) as PotholeStatus[]).map((st) => {
               const token = STATUS_TOKENS[st];
@@ -105,7 +125,11 @@ export default function MapPage() {
                   title={token.tooltip}
                 >
                   <span className="flex items-center space-x-1.5 truncate">
-                    <Icon className={`w-3.5 h-3.5 shrink-0 ${isChecked ? token.tailwindClass : "text-slate-400"}`} />
+                    <Icon
+                      className={`w-3.5 h-3.5 shrink-0 ${
+                        isChecked ? token.tailwindClass : "text-slate-400"
+                      }`}
+                    />
                     <span className="truncate">{token.label}</span>
                   </span>
                   <span className="ml-1 text-[11px] font-mono opacity-80">
@@ -117,6 +141,14 @@ export default function MapPage() {
           </div>
         </div>
 
+        {/* Legend strip */}
+        <div className="px-4 py-2 bg-slate-100/60 border-b border-slate-200 text-[11px] text-slate-500 flex items-center justify-between">
+          <span className="font-medium flex items-center gap-1">
+            <Info className="w-3.5 h-3.5 text-slate-400" />
+            <span>Map Legend: Pins dual-encoded by icon & status color</span>
+          </span>
+        </div>
+
         {/* List of Potholes */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
           {loading ? (
@@ -126,9 +158,9 @@ export default function MapPage() {
           ) : filteredPotholes.length === 0 ? (
             <div className="text-center py-12 px-4 text-slate-500 text-sm">
               <Layers className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-              <p className="font-semibold text-slate-700">No potholes match filters</p>
+              <p className="font-semibold text-slate-700">No potholes reported yet.</p>
               <p className="text-xs text-slate-400 mt-1">
-                Select more statuses above or start a dashcam drive.
+                Start a drive with the CivicLens app or run the demo replay.
               </p>
             </div>
           ) : (
@@ -142,7 +174,7 @@ export default function MapPage() {
                   onClick={() => setActivePothole(p)}
                   className={`p-3 rounded-xl border text-left cursor-pointer transition ${
                     isSelected
-                      ? "border-emerald-500 bg-emerald-50/40 shadow-xs"
+                      ? "border-emerald-500 bg-emerald-50/40 shadow-xs ring-1 ring-emerald-500/20"
                       : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50"
                   }`}
                 >
@@ -166,13 +198,15 @@ export default function MapPage() {
                   <div className="flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-100 pt-2 mt-2">
                     <span className="flex items-center space-x-1 font-mono">
                       <MapPin className="w-3 h-3 text-slate-400" />
-                      <span>{p.lat.toFixed(4)}, {p.lon.toFixed(4)}</span>
+                      <span>
+                        {p.lat.toFixed(4)}, {p.lon.toFixed(4)}
+                      </span>
                     </span>
                     <Link
                       href={`/pothole/${p.id}`}
                       className="text-emerald-600 hover:text-emerald-700 font-medium inline-flex items-center space-x-0.5"
                     >
-                      <span>Evidence</span>
+                      <span>View evidence</span>
                       <ExternalLink className="w-3 h-3" />
                     </Link>
                   </div>
@@ -184,20 +218,16 @@ export default function MapPage() {
       </aside>
 
       {/* Map Viewport Area */}
-      <section className="flex-1 bg-slate-100 flex flex-col relative overflow-hidden">
-        {/* Map Header Overlay */}
-        <div className="absolute top-4 left-4 z-20 bg-white/95 backdrop-blur px-4 py-2.5 rounded-xl border border-slate-200/90 shadow-sm flex items-center space-x-3">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-          <div className="text-xs">
-            <span className="font-semibold text-slate-800">Live Map View</span>
-            <span className="text-slate-400 mx-1.5">·</span>
-            <span className="text-slate-500 font-mono">Chandigarh Metro (Demo)</span>
-          </div>
-        </div>
+      <section className="flex-1 bg-slate-100 flex flex-col relative overflow-hidden h-[55vh] md:h-auto">
+        <MapLibreView
+          potholes={filteredPotholes}
+          activePothole={activePothole}
+          onSelectPothole={(p) => setActivePothole(p)}
+        />
 
-        {/* Selected Pothole Spotlight Card */}
+        {/* Active Pothole Spotlight Overlay on bottom-left */}
         {activePothole && (
-          <div className="absolute bottom-6 left-6 right-6 md:left-auto md:right-6 md:w-96 z-20 bg-white rounded-2xl border border-slate-200/90 shadow-lg p-4 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="absolute bottom-6 left-6 right-6 md:left-auto md:right-6 md:w-96 z-10 bg-white/95 backdrop-blur rounded-2xl border border-slate-200/90 shadow-xl p-4 pointer-events-auto">
             <div className="flex items-start justify-between mb-2">
               <div>
                 <StatusBadge status={activePothole.status} size="md" />
@@ -216,16 +246,17 @@ export default function MapPage() {
             </div>
 
             <div className="text-xs text-slate-600 space-y-1.5 my-3">
-              <div className="flex items-center space-x-1.5">
+              <div className="flex items-center space-x-1.5 font-mono">
                 <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                <span className="font-mono text-slate-800 font-medium">
+                <span className="text-slate-800 font-medium">
                   {activePothole.lat.toFixed(5)}, {activePothole.lon.toFixed(5)}
                 </span>
               </div>
               <div className="flex items-center space-x-1.5 text-slate-500">
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
                 <span>
-                  First seen: {new Date(activePothole.first_seen_at).toLocaleDateString()}
+                  First seen:{" "}
+                  {new Date(activePothole.first_seen_at).toLocaleDateString()}
                 </span>
               </div>
             </div>
@@ -239,21 +270,6 @@ export default function MapPage() {
             </Link>
           </div>
         )}
-
-        {/* Interactive Map Visual Backdrop */}
-        <div className="flex-1 w-full h-full flex items-center justify-center bg-radial from-slate-200 via-slate-100 to-slate-200/80 p-8 text-center">
-          <div className="max-w-md bg-white/80 backdrop-blur p-6 rounded-2xl border border-slate-300/80 shadow-xs">
-            <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto mb-3">
-              <MapPin className="w-6 h-6" />
-            </div>
-            <h3 className="text-base font-bold text-slate-800">
-              Interactive Map Active
-            </h3>
-            <p className="text-xs text-slate-500 mt-1">
-              Plotting {filteredPotholes.length} verified and reported road conditions with standard OSM tiles. Select any card on the left to inspect camera crops and verification logs.
-            </p>
-          </div>
-        </div>
       </section>
     </div>
   );
