@@ -71,3 +71,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Agent Swarm / Graphify
+.agents/
+graphify-out/

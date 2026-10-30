@@ -12,12 +12,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import derive_fixed_token, hash_fixed_token
 from app.clock import clock
-from app.config import Settings
+from app.config import Settings, Thresholds
+from app.logic.coverage import CoverageResult, PassQualityThresholds
 from app.logic.state_machine import PotholeStatus, TransitionReason, validate_transition
+from app.logic.verification import (
+    Decision,
+    VerificationThresholdsConfig,
+)
+from app.logic.verification import (
+    evaluate as pure_evaluate,
+)
 from app.models import (
     Authority,
     Device,
     Event,
+    PassCoverage,
     Pothole,
     SeverityBand,
     StatusHistory,
@@ -314,9 +323,7 @@ async def get_pothole_thumbnail_url(
     """Generate presigned GET URL for the pothole's thumbnail crop."""
     target_event: Event | None = None
     if pothole.before_event_id:
-        res = await session.execute(
-            select(Event).where(Event.id == pothole.before_event_id)
-        )
+        res = await session.execute(select(Event).where(Event.id == pothole.before_event_id))
         target_event = res.scalar_one_or_none()
 
     if target_event is None:
@@ -357,14 +364,14 @@ async def claim_fixed_pothole(
 
     if pothole.status != PotholeStatus.REPORTED:
         from fastapi import HTTPException, status
+
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "error": {
                     "code": "invalid_claim_state",
                     "message": (
-                        f"Pothole cannot be claimed in its current status: "
-                        f"{pothole.status.value}"
+                        f"Pothole cannot be claimed in its current status: {pothole.status.value}"
                     ),
                 }
             },
@@ -391,7 +398,141 @@ async def claim_fixed_pothole(
         evidence=evidence,
         at=at,
     )
+
+    # Re-evaluate in case post-claim passes exist
+    await evaluate_pothole(
+        session=session,
+        pothole_id=pothole.id,
+        now=at,
+    )
+
     return pothole, True
+
+
+async def evaluate_pothole(
+    session: AsyncSession,
+    pothole_id: uuid.UUID,
+    thresholds: Thresholds | None = None,
+    settings: Settings | None = None,
+    now: datetime | None = None,
+) -> tuple[Pothole, Decision]:
+    """Evaluate verification state for a pothole according to docs/STATE_MACHINE.md §4.
+
+    Acquires an exclusive row lock on the pothole (SELECT ... FOR UPDATE).
+    Queries events and post-claim pass coverages, calls pure logic evaluate(),
+    and if the status changes:
+    - Calls record_status_transition (which adds status_history).
+    - If new status is REOPENED, queues a reopened report email.
+
+    Idempotent: If status does not change, no status_history row is added.
+    """
+    pothole = await get_pothole_by_id(session, pothole_id, for_update=True)
+    if pothole is None:
+        raise ValueError(f"Pothole {pothole_id} not found")
+
+    # Only evaluate potholes that are claimed_fixed, unknown, or verified
+    if pothole.status not in (
+        PotholeStatus.CLAIMED_FIXED,
+        PotholeStatus.UNKNOWN,
+        PotholeStatus.VERIFIED,
+    ):
+        return pothole, Decision.none(pothole.status.value)
+
+    if pothole.claimed_fixed_at is None:
+        return pothole, Decision.none(pothole.status.value)
+
+    if now is None:
+        now = await clock.now(session)
+
+    if thresholds is None:
+        from app.config import load_thresholds
+
+        s = settings or Settings()
+        thresholds = load_thresholds(s.THRESHOLDS_PATH)
+
+    # Load events for this pothole
+    stmt_events = (
+        select(Event).where(Event.pothole_id == pothole_id).order_by(Event.captured_at.asc())
+    )
+    res_events = await session.execute(stmt_events)
+    events = list(res_events.scalars().all())
+
+    # Load post-claim pass coverage rows
+    stmt_cov = (
+        select(PassCoverage)
+        .where(
+            PassCoverage.pothole_id == pothole_id,
+            PassCoverage.crossing_at > pothole.claimed_fixed_at,
+        )
+        .order_by(PassCoverage.crossing_at.asc())
+    )
+    res_cov = await session.execute(stmt_cov)
+    cov_rows = list(res_cov.scalars().all())
+
+    coverage_results = [
+        CoverageResult(
+            pass_id=c.pass_id,
+            crossing_at=c.crossing_at,
+            clean=c.clean,
+            reason=c.reason,
+            window_samples=c.window_samples,
+            ok_fraction=float(c.ok_fraction) if c.ok_fraction is not None else 0.0,
+            occlusion_checked=thresholds.pass_quality.occlusion_check_enabled,
+        )
+        for c in cov_rows
+    ]
+
+    th_ver = VerificationThresholdsConfig(
+        required_clean_passes=thresholds.verification.required_clean_passes,
+        require_distinct_passes=thresholds.verification.require_distinct_passes,
+        reopen_min_event_confidence=thresholds.verification.reopen_min_event_confidence,
+        reopen_min_events=thresholds.verification.reopen_min_events,
+    )
+    th_pass = PassQualityThresholds(
+        sample_interval_s=thresholds.pass_quality.sample_interval_s,
+        window_min_m=thresholds.pass_quality.window_min_m,
+        window_max_m=thresholds.pass_quality.window_max_m,
+        max_lateral_offset_m=thresholds.pass_quality.max_lateral_offset_m,
+        max_heading_diff_deg=thresholds.pass_quality.max_heading_diff_deg,
+        min_window_samples=thresholds.pass_quality.min_window_samples,
+        min_window_ok_fraction=thresholds.pass_quality.min_window_ok_fraction,
+        min_sharpness=thresholds.pass_quality.min_sharpness,
+        max_occlusion_ratio=thresholds.pass_quality.max_occlusion_ratio,
+        occlusion_check_enabled=thresholds.pass_quality.occlusion_check_enabled,
+        min_mean_luma=thresholds.pass_quality.min_mean_luma,
+        max_gps_accuracy_m=thresholds.pass_quality.max_gps_accuracy_m,
+        max_speed_mps=thresholds.pass_quality.max_speed_mps,
+        min_inference_fps=thresholds.pass_quality.min_inference_fps,
+        require_detector_active=thresholds.pass_quality.require_detector_active,
+    )
+
+    decision = pure_evaluate(
+        pothole=pothole,
+        events=events,
+        passes=coverage_results,
+        now=now,
+        th_ver=th_ver,
+        th_pass=th_pass,
+    )
+
+    if decision.status_changed and decision.new_status is not None:
+        new_status = PotholeStatus(decision.new_status)
+        await record_status_transition(
+            session=session,
+            pothole=pothole,
+            new_status=new_status,
+            reason=decision.reason,
+            evidence=decision.evidence,
+            at=now,
+        )
+
+        if new_status == PotholeStatus.REOPENED:
+            from app.services.events import ensure_reopened_report_queued
+
+            s = settings or Settings()
+            await ensure_reopened_report_queued(session, pothole, s)
+
+    return pothole, decision
 
 
 async def list_potholes(

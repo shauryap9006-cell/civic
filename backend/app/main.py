@@ -1,5 +1,6 @@
 """CivicLens backend FastAPI application."""
 
+import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, Literal
@@ -11,6 +12,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.admin_router import admin_router
+from app.api.read_router import read_router
 from app.auth import register_or_get_device, verify_request_signature
 from app.clock import clock
 from app.config import Settings, Thresholds, load_thresholds
@@ -18,8 +21,10 @@ from app.db import get_db_session, init_db
 from app.logic.state_machine import PotholeStatus
 from app.models import parse_point_wkb
 from app.services.events import ingest_single_event
+from app.services.passes import ingest_pass
 from app.services.potholes import (
     claim_fixed_pothole,
+    evaluate_pothole,
     find_pothole_by_fixed_token,
     get_pothole_source_badge,
     get_pothole_thumbnail_url,
@@ -52,6 +57,11 @@ app = FastAPI(
     description="Pothole detection and quality-gated repair verification API.",
     lifespan=lifespan,
 )
+
+app.include_router(read_router)
+app.include_router(admin_router)
+app.state._read_router_mounted = True
+app.state._admin_router_mounted = True
 
 # CORS
 app.add_middleware(
@@ -133,6 +143,19 @@ class EventResult(BaseModel):
 
 class EventsResponse(BaseModel):
     results: list[EventResult]
+
+
+class StatusChangeItem(BaseModel):
+    pothole_id: str
+    from_status: str
+    to_status: str
+
+
+class PassResponse(BaseModel):
+    pass_id: str
+    result: Literal["accepted", "duplicate"]
+    potholes_evaluated: int = 0
+    status_changes: list[StatusChangeItem] = Field(default_factory=list)
 
 
 class PotholeSummary(BaseModel):
@@ -321,10 +344,48 @@ async def upload_events(
             settings=settings,
             thresholds=active_thresholds,
         )
+        if res.get("result") == "accepted" and res.get("pothole_id"):
+            try:
+                pid = uuid.UUID(res["pothole_id"])
+                updated_pothole, decision = await evaluate_pothole(
+                    session=session,
+                    pothole_id=pid,
+                    thresholds=active_thresholds,
+                    settings=settings,
+                )
+                res["pothole_status"] = updated_pothole.status.value
+            except Exception:
+                pass
         results.append(res)
 
     await session.commit()
     return EventsResponse(results=[EventResult(**r) for r in results])
+
+
+@app.post("/v1/passes", tags=["Ingest"], response_model=PassResponse)
+async def upload_pass(
+    request: Request,
+    body: SignedEnvelope,
+    session: AsyncSession = Depends(get_db_session),
+) -> PassResponse:
+    """Upload one drive pass with quality samples (W-08)."""
+    settings: Settings = getattr(app.state, "settings", Settings())
+    thresholds: Thresholds | None = getattr(app.state, "thresholds", None)
+    tolerance = thresholds.auth.request_signature_tolerance_s if thresholds else 300
+
+    device = await verify_request_signature(request, session, tolerance_s=tolerance)
+    active_thresholds = thresholds or load_thresholds(settings.THRESHOLDS_PATH)
+
+    result = await ingest_pass(
+        session=session,
+        device=device,
+        payload_str=body.payload,
+        signature_b64=body.signature,
+        settings=settings,
+        thresholds=active_thresholds,
+    )
+    await session.commit()
+    return PassResponse(**result)
 
 
 @app.get("/v1/fixed/{token}", tags=["Authority"])

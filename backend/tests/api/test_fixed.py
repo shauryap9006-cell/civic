@@ -425,4 +425,3 @@ async def test_fixed_claim_invalid_status_409(client: AsyncClient, session: Asyn
     err = resp.json()["error"]
     assert err["code"] == "invalid_claim_state"
     assert "open" in err["message"]
-
